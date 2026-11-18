@@ -40,10 +40,10 @@
         "android15-6.6"
       ],
       "daemon": {
-        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-generic-kdp",
-        "size": 4717248,
-        "sha256": "679504dd4e104dc1a296ed4ec795b5a5f3e808c2bd345a7ecfa201b40f1dca1d",
-        "version": "3.4.2"
+        "url": "https://raw.githubusercontent.com/IslamIssa1997/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-generic-kdp",
+        "size": 4866080,
+        "sha256": "f2929b852a6c5c6ff9e21447ad02e09a804cfb655ee8c38ac3fcfc97a9d88ac0",
+        "version": "aa235b99574b5b349cdb4980bcb98fd58e6abb28"
       }
     },
     {
