@@ -1105,7 +1105,7 @@ index d4921bf9..9c5dffc6 100644
  // Restore syscall_table[@nr] to its original value recorded by
  // ksu_syscall_table_hook(), and remove the entry from the tracking list.
 diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
-index cf21fed8..1fcf9907 100644
+index cf21fed8..fa884122 100644
 --- a/kernel/hook/syscall_hook_manager.c
 +++ b/kernel/hook/syscall_hook_manager.c
 @@ -5,6 +5,7 @@
@@ -1116,7 +1116,7 @@ index cf21fed8..1fcf9907 100644
  #include <trace/events/syscalls.h>
  
  #include <linux/version.h>
-@@ -22,6 +23,304 @@
+@@ -22,6 +23,331 @@
  #if defined(__riscv)
  #include "hook/riscv64/syscall_regs.h"
  #endif
@@ -1125,6 +1125,8 @@ index cf21fed8..1fcf9907 100644
 +static bool syscall_hook_manager_initialized;
 +
 +#if defined(CONFIG_KSU_SAMSUNG_RKP) && defined(CONFIG_KRETPROBES) && defined(__aarch64__)
++#include "selinux/selinux.h"
++
 +struct ksu_setresuid_task_work {
 +    struct callback_head callback;
 +    uid_t old_uid;
@@ -1211,11 +1213,36 @@ index cf21fed8..1fcf9907 100644
 +
 +static int samsung_sucompat_execve_pre_handler(struct kprobe *probe, struct pt_regs *regs)
 +{
-+    if (!samsung_sucompat_should_redirect(__NR_execve))
-+        return 0;
++    struct pt_regs *syscall_regs = task_pt_regs(current);
 +
-+    instruction_pointer_set(regs, (unsigned long)samsung_sucompat_execve);
-+    return 1;
++    // Re-entry from samsung_sucompat_execve: the wrapper flipped syscallno to
++    // the bypass marker and called ksu_hook_execve, which falls through to the
++    // real syscall. Restore the real number and pass this call through so the
++    // kernel runs the probed function exactly once.
++    if (unlikely(syscall_regs->syscallno == SAMSUNG_SUCOMPAT_BYPASS_NR)) {
++        syscall_regs->syscallno = __NR_execve;
++        return 0;
++    }
++
++    // Sucompat path: a UID allowed to see /system/bin/su.
++    if (ksu_su_compat_enabled &&
++        ksu_is_allow_uid_for_current(current_uid().val)) {
++        instruction_pointer_set(regs, (unsigned long)samsung_sucompat_execve);
++        return 1;
++    }
++
++    // adb_root path: an init-child's execve. syscall_event_bridge's own
++    // dispatcher is unavailable on Samsung RKP, so without this redirect
++    // ksu_hook_execve is never called for adbd and the LD_PRELOAD inject
++    // path (ksu_adb_root_handle_execve) never runs. samsung_sucompat_execve
++    // routes through ksu_hook_execve, which has the init-child branch that
++    // reaches adb_root.
++    if (current->pid != 1 && is_init(current_cred())) {
++        instruction_pointer_set(regs, (unsigned long)samsung_sucompat_execve);
++        return 1;
++    }
++
++    return 0;
 +}
 +
 +static int samsung_sucompat_newfstatat_pre_handler(struct kprobe *probe, struct pt_regs *regs)
@@ -1421,7 +1448,7 @@ index cf21fed8..1fcf9907 100644
  
  #ifdef CONFIG_KRETPROBES
  
-@@ -130,6 +429,23 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -130,6 +456,23 @@ void __init ksu_syscall_hook_manager_init(void)
      int ret;
      pr_info("hook_manager: ksu_hook_manager_init called\n");
  
@@ -1445,7 +1472,7 @@ index cf21fed8..1fcf9907 100644
  #ifdef CONFIG_KRETPROBES
      syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
      syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-@@ -162,6 +478,17 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -162,6 +505,17 @@ void __init ksu_syscall_hook_manager_init(void)
  void __exit ksu_syscall_hook_manager_exit(void)
  {
      pr_info("hook_manager: ksu_hook_manager_exit called\n");
@@ -1551,21 +1578,32 @@ index 6336a222..33ac48b7 100644
  
  void __init ksu_app_profile_init(void)
 diff --git a/kernel/selinux/selinux.c b/kernel/selinux/selinux.c
-index 1a76dbd7..c0a0a996 100644
+index 1a76dbd7..324a1364 100644
 --- a/kernel/selinux/selinux.c
 +++ b/kernel/selinux/selinux.c
-@@ -5,6 +5,7 @@
+@@ -5,6 +5,8 @@
  #include "linux/version.h"
  #include "klog.h" // IWYU pragma: keep
  #include "ksu.h"
 +#include "compat/samsung_defex.h"
++#include "ksu_samsung_kdp.h"
  #include "infra/symbol_resolver.h"
  
  #ifdef CONFIG_ANDROID
-@@ -310,4 +311,7 @@ void escape_to_root_for_adb_root(void)
+@@ -309,5 +311,16 @@ void escape_to_root_for_adb_root(void)
+         abort_creds(cred);
          return;
      }
-     commit_creds(cred);
+-    commit_creds(cred);
++    /* Samsung KDP protects live credentials against plain commit_creds, so a
++     * call through it on a KDP-protected task triggers an EL2 abort. Route
++     * through the KDP-aware wrapper, which copies the cred under KDP's rules
++     * when the protection is active and falls back to commit_creds otherwise. */
++    if (ksu_samsung_kdp_commit_creds(cred)) {
++        pr_err("Samsung KDP credential install failed for adbd\n");
++        abort_creds(cred);
++        return;
++    }
 +    /* Every path that installs root creds has to tell DEFEX, or DEFEX keeps
 +     * enforcing against the task it still believes is a root task. */
 +    ksu_samsung_defex_sync_current();
@@ -1628,7 +1666,7 @@ index 48a82e1b..cccb123e 100644
      }
      cmd.features = KSU_FEATURE_MAX;
 diff --git a/userspace/ksud/src/late_load.rs b/userspace/ksud/src/late_load.rs
-index c086df09..626ca0cc 100644
+index c086df09..cec43fc0 100644
 --- a/userspace/ksud/src/late_load.rs
 +++ b/userspace/ksud/src/late_load.rs
 @@ -1,7 +1,7 @@
@@ -1666,7 +1704,7 @@ index c086df09..626ca0cc 100644
  
      crate::hot_install::clean_trash();
  
-@@ -135,16 +138,30 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
+@@ -135,16 +138,39 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
      // 13. Execute boot-completed stage scripts (non-blocking)
      init_event::run_stage("boot-completed", ScriptWait::NoWait);
  
@@ -1680,7 +1718,16 @@ index c086df09..626ca0cc 100644
 -            &format!("{package_name}/com.rifsxd.ksunext.ui.MainActivity"),
 -        ])
 -        .status();
-+    // 14. Replace every Manager's bundled libksud.so with the patched daemon.
++    // 14. Restart adbd so adb_root's LD_PRELOAD inject can take effect.
++    //     adb_root's hook only fires on adbd's exec, and the adbd that
++    //     started before KernelSU was late-loaded never went through it.
++    //     Doing this from here rather than from the Manager via su, because
++    //     a brand-new late-load does not yet have a su shell the Manager can
++    //     call in - we already have root in this process.
++    let _ = std::process::Command::new("stop").arg("adbd").status();
++    let _ = std::process::Command::new("start").arg("adbd").status();
++
++    // 15. Replace every Manager's bundled libksud.so with the patched daemon.
 +    //     The Manager package name is obfuscated at install time (spoofed
 +    //     builds rename themselves on every release), so we cannot filter by
 +    //     package name: scan /data/app for any libksud.so and overwrite it.
