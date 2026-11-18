@@ -1538,7 +1538,7 @@ index 48a82e1b..cccb123e 100644
      }
      cmd.features = KSU_FEATURE_MAX;
 diff --git a/userspace/ksud/src/late_load.rs b/userspace/ksud/src/late_load.rs
-index c086df09..99f715a2 100644
+index c086df09..626ca0cc 100644
 --- a/userspace/ksud/src/late_load.rs
 +++ b/userspace/ksud/src/late_load.rs
 @@ -1,7 +1,7 @@
@@ -1576,7 +1576,7 @@ index c086df09..99f715a2 100644
  
      crate::hot_install::clean_trash();
  
-@@ -135,16 +138,5 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
+@@ -135,16 +138,30 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
      // 13. Execute boot-completed stage scripts (non-blocking)
      init_event::run_stage("boot-completed", ScriptWait::NoWait);
  
@@ -1590,7 +1590,31 @@ index c086df09..99f715a2 100644
 -            &format!("{package_name}/com.rifsxd.ksunext.ui.MainActivity"),
 -        ])
 -        .status();
--
++    // 14. Replace every Manager's bundled libksud.so with the patched daemon.
++    //     The Manager package name is obfuscated at install time (spoofed
++    //     builds rename themselves on every release), so we cannot filter by
++    //     package name: scan /data/app for any libksud.so and overwrite it.
++    //     Without this, a user who taps "Install" or "Update" inside the
++    //     Manager would downgrade /data/adb/ksud to the APK's bundled copy
++    //     and lose the Samsung delta.
++    if let Ok(output) = std::process::Command::new("find")
++        .args(["/data/app", "-name", "libksud.so"])
++        .output()
++    {
++        if let Ok(stdout) = String::from_utf8(output.stdout) {
++            for lib_path in stdout.lines() {
++                let lib_path = lib_path.trim();
++                if lib_path.is_empty() {
++                    continue;
++                }
++                match std::fs::copy(defs::DAEMON_PATH, lib_path) {
++                    Ok(_) => info!("replaced {lib_path} with patched ksud"),
++                    Err(e) => warn!("failed to replace {lib_path}: {e}"),
++                }
++            }
++        }
++    }
+ 
      Ok(())
  }
 diff --git a/userspace/ksud/src/utils.rs b/userspace/ksud/src/utils.rs
