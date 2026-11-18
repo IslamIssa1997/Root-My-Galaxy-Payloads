@@ -682,7 +682,7 @@ jobs:
               "flavor": "kernelsu-next",
               "kmis": [kmi],
               "daemon": {
-                  "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/" + name,
+                  "url": "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/kernelsu/" + name,
                   "size": size,
                   "sha256": digest,
                   "version": version,
