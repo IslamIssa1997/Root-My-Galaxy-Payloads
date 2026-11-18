@@ -1480,6 +1480,63 @@ index 1a76dbd7..c0a0a996 100644
 +     * enforcing against the task it still believes is a root task. */
 +    ksu_samsung_defex_sync_current();
  }
+diff --git a/kernel/supercall/dispatch.c b/kernel/supercall/dispatch.c
+index 48a82e1b..cccb123e 100644
+--- a/kernel/supercall/dispatch.c
++++ b/kernel/supercall/dispatch.c
+@@ -47,10 +47,13 @@ static int do_grant_root(void __user *arg)
+ static int do_get_info(void __user *arg)
+ {
+     struct ksu_get_info_cmd cmd = { .version = KERNEL_SU_VERSION, .flags = 0 };
++    bool manager = is_manager();
+ 
+ #ifdef MODULE
+     cmd.flags |= KSU_GET_INFO_FLAG_LKM;
+-    if (ksu_bundled) {
++    /* Report BUNDLED to the manager so a late-loaded LKM is not shown
++     * as "Custom"; ksud still sees the real ksu_bundled value. */
++    if (ksu_bundled || manager) {
+         cmd.flags |= KSU_GET_INFO_FLAG_BUNDLED;
+     }
+ #endif
+@@ -58,10 +61,12 @@ static int do_get_info(void __user *arg)
+     if (ksuver_override)
+         cmd.version = ksuver_override;
+ 
+-    if (is_manager()) {
++    if (manager) {
+         cmd.flags |= KSU_GET_INFO_FLAG_MANAGER;
+     }
+-    if (ksu_late_loaded) {
++    /* Hide the late-load (jailbreak) badge from the manager UI only;
++     * ksud and other root callers still see it. The LKM badge is kept. */
++    if (ksu_late_loaded && !manager) {
+         cmd.flags |= KSU_GET_INFO_FLAG_LATE_LOAD;
+     }
+     // A late load never sees PID 1's selinux_setup, so preinit cannot run.
+@@ -82,18 +87,19 @@ static int do_get_info(void __user *arg)
+ static int do_get_info_legacy(void __user *arg)
+ {
+     struct ksu_get_info_legacy_cmd cmd = { .version = KERNEL_SU_VERSION, .flags = 0 };
++    bool manager = is_manager();
+ 
+ #ifdef MODULE
+     cmd.flags |= KSU_GET_INFO_FLAG_LKM;
+-    if (ksu_bundled) {
++    if (ksu_bundled || manager) {
+         cmd.flags |= KSU_GET_INFO_FLAG_BUNDLED;
+     }
+ #endif
+ 
+-    if (is_manager()) {
++    if (manager) {
+         cmd.flags |= KSU_GET_INFO_FLAG_MANAGER;
+     }
+-    if (ksu_late_loaded) {
++    if (ksu_late_loaded && !manager) {
+         cmd.flags |= KSU_GET_INFO_FLAG_LATE_LOAD;
+     }
+     cmd.features = KSU_FEATURE_MAX;
 diff --git a/userspace/ksud/src/late_load.rs b/userspace/ksud/src/late_load.rs
 index c086df09..99f715a2 100644
 --- a/userspace/ksud/src/late_load.rs

@@ -134,7 +134,7 @@ jobs:
           # finds `phys_from_virt` and `ksu_patch_text` defined twice. Measured on the first v3.4.2 run.
           # Whatever that tree is, this build is the pin below plus this repository's own two files, and
           # a leftover from the tag is neither.
-          rm -f KernelSU/kernel/susfs/*
+          rm -rf KernelSU/kernel/susfs/*
           # Their sources, minus three files:
           #
           #   lsm_hook.c        upstream's security_hook_heads install path; ours is the kprobe route
