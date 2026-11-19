@@ -41,8 +41,8 @@
       ],
       "daemon": {
         "url": "https://raw.githubusercontent.com/IslamIssa1997/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-generic-kdp",
-        "size": 4867776,
-        "sha256": "a1152f2bb2ac6cf4171fc71f8ec54c3a6d544afc6bd1f73d5afb55c061d81f79",
+        "size": 4871264,
+        "sha256": "9b6127094e2122a43228f713cfc7d838639c801090f7d9046b18f8bcf4aa6ad3",
         "version": "aa235b99574b5b349cdb4980bcb98fd58e6abb28"
       }
     },
